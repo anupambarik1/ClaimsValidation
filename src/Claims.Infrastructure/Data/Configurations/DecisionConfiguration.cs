@@ -10,7 +10,7 @@ public class DecisionConfiguration : IEntityTypeConfiguration<Decision>
     {
         builder.HasKey(d => d.DecisionId);
 
-        builder.Property(d => d.DecisionStatus)
+        builder.Property(d => d.Status)
             .IsRequired()
             .HasConversion<string>()
             .HasMaxLength(50);
@@ -20,6 +20,9 @@ public class DecisionConfiguration : IEntityTypeConfiguration<Decision>
             .HasDefaultValueSql("GETUTCDATE()");
 
         builder.Property(d => d.DecidedBy)
+            .HasMaxLength(100);
+
+        builder.Property(d => d.ReviewerId)
             .HasMaxLength(100);
 
         builder.Property(d => d.FraudScore)

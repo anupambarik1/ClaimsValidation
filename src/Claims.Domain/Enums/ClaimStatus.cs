@@ -8,5 +8,6 @@ public enum ClaimStatus
     Rejected,
     ManualReview,
     Approved,
+    UnderReview,
     PendingDocuments
 }

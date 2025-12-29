@@ -1,4 +1,5 @@
 using Claims.Infrastructure.Data;
+using Claims.Services.Azure;
 using Claims.Services.Implementations;
 using Claims.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
@@ -10,7 +11,12 @@ builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
-    c.SwaggerDoc("v1", new() { Title = "Claims Validation API", Version = "v1" });
+    c.SwaggerDoc("v1", new() 
+    { 
+        Title = "Claims Validation API", 
+        Version = "v1",
+        Description = "AI-powered claims validation system with OCR, fraud detection, and automated decision-making"
+    });
 });
 
 // Configure Database
@@ -23,18 +29,43 @@ builder.Services.AddDbContext<ClaimsDbContext>(options =>
     }
     else
     {
-        // Use in-memory database for development
+        // Use in-memory database for development/demo
         options.UseInMemoryDatabase("ClaimsDb");
     }
 });
 
-// Register Application Services
+// Register Core Application Services
 builder.Services.AddScoped<IClaimsService, ClaimsService>();
-builder.Services.AddScoped<IOcrService, OcrService>();
 builder.Services.AddScoped<IDocumentAnalysisService, DocumentAnalysisService>();
 builder.Services.AddScoped<IRulesEngineService, RulesEngineService>();
-builder.Services.AddScoped<IMlScoringService, MlScoringService>();
+builder.Services.AddSingleton<IMlScoringService, MlScoringService>(); // Singleton to keep ML model loaded
 builder.Services.AddScoped<INotificationService, NotificationService>();
+
+// Register OCR Service - Choose based on configuration
+var useAzureDocumentIntelligence = builder.Configuration.GetValue<bool>("FeatureFlags:UseAzureDocumentIntelligence");
+if (useAzureDocumentIntelligence)
+{
+    builder.Services.AddScoped<IOcrService, AzureDocumentIntelligenceService>();
+}
+else
+{
+    builder.Services.AddScoped<IOcrService, OcrService>(); // Tesseract fallback
+}
+
+// Register Azure Services (available when enabled)
+builder.Services.AddSingleton<AzureOpenAIService>();
+builder.Services.AddSingleton<AzureBlobStorageService>();
+builder.Services.AddSingleton<AzureEmailService>();
+
+// Add Application Insights (if configured)
+var appInsightsConnectionString = builder.Configuration["Azure:ApplicationInsights:ConnectionString"];
+if (!string.IsNullOrEmpty(appInsightsConnectionString))
+{
+    builder.Services.AddApplicationInsightsTelemetry(options =>
+    {
+        options.ConnectionString = appInsightsConnectionString;
+    });
+}
 
 // Add CORS
 builder.Services.AddCors(options =>
@@ -53,7 +84,11 @@ var app = builder.Build();
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI(c => c.SwaggerEndpoint("/swagger/v1/swagger.json", "Claims API v1"));
+    app.UseSwaggerUI(c => 
+    {
+        c.SwaggerEndpoint("/swagger/v1/swagger.json", "Claims API v1");
+        c.RoutePrefix = string.Empty; // Serve Swagger at root
+    });
 }
 
 app.UseHttpsRedirection();
@@ -62,11 +97,55 @@ app.UseAuthorization();
 app.MapControllers();
 
 // Health check endpoint
-app.MapGet("/health", () => Results.Ok(new
+app.MapGet("/health", (IConfiguration config) => 
 {
-    status = "healthy",
-    timestamp = DateTime.UtcNow,
-    service = "Claims.Api"
+    var featureFlags = new
+    {
+        AzureDocumentIntelligence = config.GetValue<bool>("FeatureFlags:UseAzureDocumentIntelligence"),
+        AzureOpenAI = config.GetValue<bool>("FeatureFlags:UseAzureOpenAI"),
+        AzureBlobStorage = config.GetValue<bool>("FeatureFlags:UseAzureBlobStorage"),
+        TesseractOCR = config.GetValue<bool>("FeatureFlags:UseTesseractOCR"),
+        LocalMLModel = config.GetValue<bool>("FeatureFlags:UseLocalMLModel"),
+        EmailNotifications = config.GetValue<bool>("FeatureFlags:SendEmailNotifications")
+    };
+
+    return Results.Ok(new
+    {
+        status = "healthy",
+        timestamp = DateTime.UtcNow,
+        service = "Claims.Api",
+        version = "1.0.0",
+        environment = app.Environment.EnvironmentName,
+        features = new[]
+        {
+            "OCR Document Processing (Tesseract / Azure Document Intelligence)",
+            "ML Fraud Detection (ML.NET)",
+            "NLP Analysis (Azure OpenAI - when enabled)",
+            "Business Rules Engine",
+            "Automated Decision Making",
+            "Azure Blob Storage (when enabled)",
+            "Email Notifications (Azure Communication Services)"
+        },
+        activeFeatures = featureFlags
+    });
+});
+
+// API info endpoint
+app.MapGet("/api", () => Results.Ok(new
+{
+    name = "Claims Validation API",
+    version = "1.0.0",
+    description = "AI-powered claims validation with real-time fraud detection",
+    platform = "Azure",
+    endpoints = new
+    {
+        submitClaim = "POST /api/claims",
+        processClaim = "POST /api/claims/{claimId}/process",
+        submitAndProcess = "POST /api/claims/submit-and-process",
+        getStatus = "GET /api/claims/{claimId}/status",
+        addDocument = "POST /api/claims/{claimId}/documents",
+        health = "GET /health"
+    }
 }));
 
 app.Run();
