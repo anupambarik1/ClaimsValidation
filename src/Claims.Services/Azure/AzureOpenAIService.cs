@@ -2,13 +2,14 @@ using Azure;
 using Azure.AI.OpenAI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Claims.Services.Interfaces;
 
 namespace Claims.Services.Azure;
 
 /// <summary>
 /// Azure OpenAI service for NLP tasks like summarization, entity extraction, and fraud analysis
 /// </summary>
-public class AzureOpenAIService
+public class AzureOpenAIService : INlpService
 {
     private readonly OpenAIClient? _client;
     private readonly ILogger<AzureOpenAIService> _logger;
@@ -91,26 +92,17 @@ Provide a concise summary:";
     /// <summary>
     /// Extract entities from claim text (names, dates, amounts, locations)
     /// </summary>
-    public async Task<ClaimEntities> ExtractEntitiesAsync(string text)
+    public async Task<string> ExtractEntitiesAsync(string text)
     {
-        var entities = new ClaimEntities();
-
         if (!IsEnabled)
         {
             _logger.LogWarning("Azure OpenAI not enabled, skipping entity extraction");
-            return entities;
+            return string.Empty;
         }
 
         try
         {
-            var prompt = $@"Extract the following entities from this insurance claim text. 
-Return as JSON with these fields: names (array), dates (array), amounts (array of numbers), 
-locations (array), claimType (string: medical/auto/property/other).
-
-Text:
-{text}
-
-Return only valid JSON:";
+            var prompt = $@"Extract the following entities from this insurance claim text. \nReturn as JSON with these fields: names (array), dates (array), amounts (array of numbers), \nlocations (array), claimType (string: medical/auto/property/other).\n\nText:\n{text}\n\nReturn only valid JSON:";
 
             var options = new ChatCompletionsOptions
             {
@@ -126,48 +118,30 @@ Return only valid JSON:";
 
             var response = await _client!.GetChatCompletionsAsync(options);
             var jsonResponse = response.Value.Choices[0].Message.Content;
-
-            // Parse JSON response (simplified - in production use System.Text.Json)
-            // For now, just log the response
             _logger.LogInformation("Entities extracted: {Entities}", jsonResponse);
-            entities.RawJson = jsonResponse;
+            return jsonResponse;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error extracting entities with Azure OpenAI");
+            return string.Empty;
         }
-
-        return entities;
     }
 
     /// <summary>
     /// Analyze claim narrative for fraud indicators
     /// </summary>
-    public async Task<FraudNarrativeAnalysis> AnalyzeFraudNarrativeAsync(string claimDescription)
+    public async Task<string> AnalyzeFraudNarrativeAsync(string claimDescription)
     {
-        var analysis = new FraudNarrativeAnalysis();
-
         if (!IsEnabled)
         {
             _logger.LogWarning("Azure OpenAI not enabled, skipping fraud narrative analysis");
-            return analysis;
+            return string.Empty;
         }
 
         try
         {
-            var prompt = $@"Analyze this insurance claim description for potential fraud indicators. 
-Look for: inconsistencies, vague details, unusual circumstances, known fraud patterns.
-
-Claim Description:
-{claimDescription}
-
-Return a JSON response with:
-- riskScore (0.0 to 1.0)
-- riskLevel (Low/Medium/High)
-- indicators (array of strings describing concerns)
-- recommendation (Approve/Review/Investigate)
-
-Return only valid JSON:";
+            var prompt = $@"Analyze this insurance claim description for potential fraud indicators. \nLook for: inconsistencies, vague details, unusual circumstances, known fraud patterns.\n\nClaim Description:\n{claimDescription}\n\nReturn a JSON response with:\n- riskScore (0.0 to 1.0)\n- riskLevel (Low/Medium/High)\n- indicators (array of strings describing concerns)\n- recommendation (Approve/Review/Investigate)\n\nReturn only valid JSON:";
 
             var options = new ChatCompletionsOptions
             {
@@ -185,16 +159,13 @@ Return only valid JSON:";
             var jsonResponse = response.Value.Choices[0].Message.Content;
 
             _logger.LogInformation("Fraud narrative analysis completed");
-            analysis.RawJson = jsonResponse;
-            analysis.Success = true;
+            return jsonResponse;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Error analyzing fraud narrative with Azure OpenAI");
-            analysis.ErrorMessage = ex.Message;
+            return string.Empty;
         }
-
-        return analysis;
     }
 
     /// <summary>

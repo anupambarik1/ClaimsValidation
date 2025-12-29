@@ -52,10 +52,97 @@ else
     builder.Services.AddScoped<IOcrService, OcrService>(); // Tesseract fallback
 }
 
-// Register Azure Services (available when enabled)
-builder.Services.AddSingleton<AzureOpenAIService>();
-builder.Services.AddSingleton<AzureBlobStorageService>();
-builder.Services.AddSingleton<AzureEmailService>();
+// Determine provider preference using feature flags or fallback to CloudProvider
+var useAwsGlobal = builder.Configuration.GetValue<bool>("FeatureFlags:UseAWS");
+var useAzureGlobal = builder.Configuration.GetValue<bool>("FeatureFlags:UseAzure");
+var cloudProvider = builder.Configuration.GetValue<string>("CloudProvider")?.ToLowerInvariant() ?? "azure";
+
+string chosenProvider;
+if (useAwsGlobal && !useAzureGlobal)
+{
+    chosenProvider = "aws";
+}
+else if (useAzureGlobal && !useAwsGlobal)
+{
+    chosenProvider = "azure";
+}
+else
+{
+    chosenProvider = cloudProvider;
+}
+
+// Register NLP service
+var useAzureOpenAI = builder.Configuration.GetValue<bool>("FeatureFlags:UseAzureOpenAI");
+var useAwsBedrock = builder.Configuration.GetValue<bool>("AWS:Bedrock:Enabled");
+if (useAzureOpenAI && !useAwsBedrock)
+{
+    builder.Services.AddSingleton<INlpService, AzureOpenAIService>();
+}
+else if (useAwsBedrock && !useAzureOpenAI)
+{
+    builder.Services.AddSingleton<INlpService, Claims.Services.Aws.AWSNlpService>();
+}
+else if (chosenProvider == "azure")
+{
+    builder.Services.AddSingleton<INlpService, AzureOpenAIService>();
+}
+else
+{
+    builder.Services.AddSingleton<INlpService, Claims.Services.Aws.AWSNlpService>();
+}
+
+// Register Blob storage service
+var useAzureBlob = builder.Configuration.GetValue<bool>("FeatureFlags:UseAzureBlobStorage");
+var useAwsS3 = builder.Configuration.GetValue<bool>("AWS:Enabled");
+if (useAzureBlob && !useAwsS3)
+{
+    builder.Services.AddSingleton<IBlobStorageService, AzureBlobStorageService>();
+}
+else if (useAwsS3 && !useAzureBlob)
+{
+    builder.Services.AddSingleton<IBlobStorageService, Claims.Services.Aws.AWSBlobStorageService>();
+}
+else if (chosenProvider == "azure")
+{
+    builder.Services.AddSingleton<IBlobStorageService, AzureBlobStorageService>();
+}
+else
+{
+    builder.Services.AddSingleton<IBlobStorageService, Claims.Services.Aws.AWSBlobStorageService>();
+}
+
+// Register Email service
+var enableEmailNotifications = builder.Configuration.GetValue<bool>("FeatureFlags:SendEmailNotifications");
+var useAzureEmail = builder.Configuration.GetValue<bool>("Azure:CommunicationServices:Enabled");
+var useAwsSes = builder.Configuration.GetValue<bool>("AWS:SES:Enabled");
+
+if (useAzureEmail && !useAwsSes && enableEmailNotifications)
+{
+    builder.Services.AddSingleton<IEmailService, AzureEmailService>();
+}
+else if (useAwsSes && !useAzureEmail && enableEmailNotifications)
+{
+    builder.Services.AddSingleton<IEmailService, Claims.Services.Aws.AWSEmailService>();
+}
+else if (chosenProvider == "azure")
+{
+    builder.Services.AddSingleton<IEmailService, AzureEmailService>();
+}
+else
+{
+    builder.Services.AddSingleton<IEmailService, Claims.Services.Aws.AWSEmailService>();
+}
+
+// Register OCR (Textract) if explicitly enabled for AWS
+var useAwsTextract = builder.Configuration.GetValue<bool>("AWS:Textract:Enabled");
+if (useAwsTextract)
+{
+    builder.Services.AddScoped<IOcrService, Claims.Services.Aws.AWSTextractService>();
+}
+else
+{
+    // Existing OCR registration handled earlier (Azure Document Intelligence or Tesseract fallback)
+}
 
 // Add Application Insights (if configured)
 var appInsightsConnectionString = builder.Configuration["Azure:ApplicationInsights:ConnectionString"];

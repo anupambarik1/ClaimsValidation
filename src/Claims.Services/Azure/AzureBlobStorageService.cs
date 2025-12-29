@@ -2,13 +2,14 @@ using Azure.Storage.Blobs;
 using Azure.Storage.Blobs.Models;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Claims.Services.Interfaces;
 
 namespace Claims.Services.Azure;
 
 /// <summary>
 /// Azure Blob Storage service for document storage
 /// </summary>
-public class AzureBlobStorageService
+public class AzureBlobStorageService : Claims.Services.Interfaces.IBlobStorageService
 {
     private readonly BlobServiceClient? _blobServiceClient;
     private readonly ILogger<AzureBlobStorageService> _logger;
@@ -230,11 +231,4 @@ public class AzureBlobStorageService
     }
 }
 
-public class BlobDocumentInfo
-{
-    public string Name { get; set; } = string.Empty;
-    public string Uri { get; set; } = string.Empty;
-    public long Size { get; set; }
-    public string? ContentType { get; set; }
-    public DateTime? UploadedAt { get; set; }
-}
+// Reuse BlobDocumentInfo defined in Claims.Services.Interfaces

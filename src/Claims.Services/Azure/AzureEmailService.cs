@@ -2,13 +2,14 @@ using Azure;
 using Azure.Communication.Email;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Claims.Services.Interfaces;
 
 namespace Claims.Services.Azure;
 
 /// <summary>
 /// Azure Communication Services for email notifications
 /// </summary>
-public class AzureEmailService
+public class AzureEmailService : IEmailService
 {
     private readonly EmailClient? _emailClient;
     private readonly ILogger<AzureEmailService> _logger;
