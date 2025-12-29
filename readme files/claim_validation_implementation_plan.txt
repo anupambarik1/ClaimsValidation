@@ -1,0 +1,860 @@
+# Claims Validation System - Architecture & Implementation Guide
+
+## Overview
+
+A comprehensive ASP.NET Core application on Azure for automated insurance claims processing using OCR, rules validation, ML-based fraud detection, and bot-driven user interaction with automated decisioning.
+
+---
+
+## Table of Contents
+
+1. [Architecture Summary](#architecture-summary)
+2. [Component Breakdown](#component-breakdown)
+3. [Technology Stack](#technology-stack)
+4. [Data Flow Patterns](#data-flow-patterns)
+5. [Azure Services](#azure-services)
+6. [Implementation Plan](#implementation-plan)
+7. [Database Schema](#database-schema)
+8. [API Endpoints](#api-endpoints)
+9. [Deployment Architecture](#deployment-architecture)
+10. [Security & Compliance](#security--compliance)
+11. [Modular Component Tables](#modular-component-tables)
+12. [Production Readiness](#production-readiness)
+
+---
+
+## Architecture Summary
+
+The Claims Validation System is built using a layered architecture with the following key characteristics:
+
+- **Layered Architecture**: Clear separation between Presentation, Application Services, Processing, and Data layers
+- **Pipeline Processing Pattern**: Sequential OCR → Rules → Analytics → Decision flow
+- **Service-Oriented Architecture**: Modular services with well-defined responsibilities
+- **Gateway Pattern**: Single API gateway (Claims.Api) for all external requests
+- **Event-Driven Capabilities**: Support for asynchronous processing via Azure Service Bus
+
+### Key Actors
+
+- **Claimant**: End-users submitting insurance claims
+- **Human Specialist**: Internal staff performing manual reviews
+
+### Architectural Patterns
+
+1. **Layered Architecture**
+   - Presentation (Bot/API)
+   - Application Services (Business logic)
+   - Processing Components (Domain logic)
+   - Data Access (EF Core repositories)
+
+2. **Pipeline Pattern**
+   - Sequential processing: OCR → Rules → Analytics → Decision
+
+3. **Service-Oriented Architecture (SOA)**
+   - Distinct services for OCR, Rules, Analytics, Notifications
+   - Services communicate through API layer
+
+4. **Gateway Pattern**
+   - Claims.Api acts as API Gateway for all external requests
+
+5. **Decision Tree Pattern**
+   - Decision Logic with branching outcomes based on scores/rules
+
+6. **Repository Pattern**
+   - Data access abstraction for SQL and Blob storage
+
+---
+
+## Component Breakdown
+
+### Complete Component Inventory
+
+#### **User Actors**
+1. **Claimant** - End user who submits insurance claims through the bot interface
+2. **Human Specialist** - Internal staff who perform manual review of flagged claims
+
+#### **Frontend Layer**
+1. **Bot Web Chat** - Web-based conversational interface for claim submission
+   - Technology: Bot Framework Web Chat SDK
+   - Features: File upload, chat history, status display, multi-turn conversations
+
+2. **Specialist Portal** - Internal dashboard for manual review
+   - Technology: Blazor Server/WASM or React SPA
+   - Features: Claim queue, document viewer, decision override, analytics dashboard
+
+#### **API Gateway Layer**
+
+**Claims.Api (ASP.NET Core on Azure App Service)**
+- REST Controllers/Minimal APIs
+- Bot Framework Endpoint (`/api/messages`)
+- Claims API (`/claims`)
+- Status API (`/status`)
+- Documents API (`/documents`)
+
+#### **Application Services Layer**
+
+1. **ClaimsService** - Core claim processing orchestration
+2. **OcrService** - Document text extraction coordination
+3. **DocumentAnalysisService** - Document classification and validation
+4. **RulesEngineService** - Business rules application
+5. **MlScoringService** - ML-based fraud/approval scoring
+6. **NotificationService** - Multi-channel notification handling
+
+#### **Processing Components**
+
+1. **Claims.OCR (Azure Computer Vision)**
+   - Purpose: Extract text from uploaded claim documents (invoices, receipts, forms)
+   - Technology: Azure Cognitive Services - Computer Vision OCR
+
+2. **Claims.Rules (Policy Validation)**
+   - Purpose: Apply business rules and policy constraints to claims
+   - Examples: Coverage limits, deductible validation, policy status checks
+
+3. **Claims.Analytics (ML/AI Processing)**
+   - Document Classification: Categorize document types
+   - Fraud Detection Score: ML model to detect suspicious patterns
+   - Approval Score: Risk-based scoring for auto-approval eligibility
+
+4. **Decision Logic**
+   - Purpose: Route claims based on scores and rules
+   - Outcomes:
+     - **AutoApprove**: Low-risk, rule-compliant claims
+     - **Reject**: Policy violations or high fraud scores
+     - **ManualReview**: Edge cases requiring human judgment
+
+#### **Data Storage**
+
+1. **Azure SQL Database (Claims Database)**
+   - Tables: Claims, Documents, Decisions, Notifications
+
+2. **Azure Blob Storage**
+   - Containers:
+     - `raw-docs`: Original uploaded documents
+     - `processed-docs`: OCR-processed and annotated documents
+
+#### **Communication Services**
+
+1. **Azure Communication Services - Email**
+   - Purpose: Send notifications to claimants and specialists
+   - Used for status updates, approval/rejection notices
+
+---
+
+## Technology Stack
+
+### Backend
+- **Framework**: ASP.NET Core 8.0 (LTS) with Minimal APIs or Controllers
+- **Hosting**: Azure App Service (Linux or Windows)
+- **Authentication**: Azure AD B2C for claimants, Azure AD for specialists
+- **API Documentation**: Swagger/OpenAPI
+- **ORM**: Entity Framework Core 8.0
+- **Resilience**: Polly (retry, circuit breaker, timeout policies)
+
+### Frontend
+- **Bot Interface**: Microsoft Bot Framework SDK v4
+- **Web Chat**: Bot Framework Web Chat (React-based)
+- **Specialist Portal**: Blazor Server/WASM or React SPA
+
+### Application Services
+- **Pattern**: Service layer with dependency injection
+- **Libraries**:
+  - Azure SDK for .NET (Blob, SQL, Communication Services)
+  - Azure.AI.FormRecognizer or Azure.AI.Vision
+  - Polly for resilience
+  - MediatR for CQRS pattern (optional)
+
+### Processing Components
+
+1. **OCR**: Azure Computer Vision OCR or Azure AI Document Intelligence (Form Recognizer)
+2. **Rules Engine**: 
+   - Options: Rules Engine NuGet package, custom rules implementation, or Azure Logic Apps
+   - Recommended: C# based rules with configuration in database/JSON
+3. **ML Analytics**:
+   - Azure Machine Learning for model training/deployment
+   - ML.NET for in-process scoring (lightweight models)
+   - Azure Cognitive Services for document classification
+
+### AI/ML Services
+- **OCR**: Azure Computer Vision or Azure AI Document Intelligence
+- **ML Models**: Azure Machine Learning or ML.NET
+- **Document Classification**: Azure Cognitive Services
+
+### Data & Storage
+- **Database**: Azure SQL Database (Standard/Premium tier)
+- **Blob Storage**: Azure Blob Storage (Hot/Cool tiers)
+- **Caching**: Azure Redis Cache (optional)
+
+### Communication
+- **Email/SMS**: Azure Communication Services
+- **Alternative**: SendGrid, Twilio
+
+### Monitoring & DevOps
+- **APM**: Application Insights for telemetry
+- **Infrastructure**: Azure Monitor
+- **Logging**: Serilog or NLog for structured logging
+- **Analytics**: Log Analytics workspace
+- **CI/CD**: Azure DevOps or GitHub Actions
+- **Secrets**: Azure Key Vault
+- **Configuration**: Azure App Configuration for feature flags
+- **IaC**: ARM templates, Bicep, or Terraform
+
+---
+
+## Data Flow Patterns
+
+### 1. Claim Submission Flow (HTTP - Red/Pink)
+Claimant → Bot Web Chat (HTTP)
+→ Claims.Api /api/messages (HTTPS)
+→ Bot Framework Connector Service
+→ Application Services Layer
+→ Processing Pipeline
+
+### 2. Document Processing Pipeline (Sequential - Black)
+OCR Stage: Claims.OCR extracts text from uploaded documents
+Rules Validation: Claims.Rules validates against policy rules
+ML Scoring: Claims.Analytics performs classification and scoring
+Decision: Decision Logic determines outcome
+Persistence: Results saved to Azure SQL Database
+Documents stored in Azure Blob Storage (raw → processed)
+
+### 3. Notification Flow (Text/Email - Green)
+Decision Logic → NotificationService
+→ Azure Communication Services
+→ Email to Claimant
+→ Email to Human Specialist (if ManualReview)
+
+### 4. Status Query Flow (Read Operations - Purple)
+Claimant/Specialist → Bot/API → Azure SQL Database
+→ Read-only queries for claim status and history
+→ Response back through same channel
+
+### 5. Manual Review Feedback Flow (Orange)
+Human Specialist reviews flagged claims
+→ Specialist Portal → Claims.Api with decision feedback
+→ Claims.Api updates database with specialist decision
+→ Notification sent to claimant
+
+
+---
+
+## Integration Points
+
+### External Integrations
+1. **Bot Framework Service** - Microsoft hosted connector for bot channels
+2. **Azure Computer Vision API** - REST API for OCR processing
+3. **Azure Communication Services** - Email/SMS sending
+4. **Azure AD/Azure AD B2C** - Authentication and authorization
+
+### Internal Integration Patterns
+1. **Synchronous HTTP/REST** - API to services layer
+2. **Service-to-Service** - Application services coordinate via dependency injection
+3. **Database as Integration** - Shared Claims SQL database
+4. **Blob Storage** - Document handoff between processing stages
+
+### Data Contracts
+- **Claims API**: JSON payloads with claim metadata
+- **OCR Output**: Structured JSON with extracted text and confidence scores
+- **Rules Engine**: Rule evaluation results with pass/fail status
+- **ML Scoring**: JSON with fraud score, approval score, confidence levels
+- **Decision**: Claim ID + Status enum + Reasoning
+
+---
+
+## Azure Services
+
+### Currently Used
+1. **Azure App Service** - Hosting Claims.Api
+2. **Azure Computer Vision** - OCR processing
+3. **Azure SQL Database** - Relational data storage
+4. **Azure Blob Storage** - Document storage
+5. **Azure Communication Services** - Email notifications
+6. **Azure Bot Service** - Bot hosting and management
+
+### Recommended Additions
+1. **Azure Key Vault** - Secrets and configuration management
+2. **Azure Application Insights** - APM and monitoring
+3. **Azure Monitor** - Infrastructure monitoring
+4. **Azure Redis Cache** - Performance optimization
+5. **Azure Machine Learning** - ML model training/deployment for fraud detection
+6. **Azure API Management** (optional) - API gateway with advanced features
+7. **Azure Service Bus** (optional) - Asynchronous messaging for decoupling
+8. **Azure Functions** (optional) - Serverless background processing
+9. **Azure AD B2C** - Customer identity management
+10. **Azure Front Door** (optional) - CDN and WAF for global distribution
+
+---
+
+## Implementation Plan
+
+### Phase 1: Infrastructure Setup
+1. **Provision Azure resources**
+   - Azure App Service
+   - Azure SQL Database
+   - Azure Blob Storage (raw-docs/processed-docs containers)
+   - Azure Computer Vision
+   - Azure Communication Services (Email)
+   - Azure Bot Service
+   - Azure Key Vault
+   - Application Insights
+   - Optional: Redis Cache, Service Bus
+
+2. **Configure networking and security**
+   - VNets, NSGs, Private Endpoints
+
+3. **Set up Azure AD B2C** for claimant authentication
+
+4. **Configure Application Insights** and logging
+
+### Phase 2: Core API Development
+1. Create ASP.NET Core 8.0 Web API project (`Claims.Api`)
+2. Implement Bot Framework endpoint (`/api/messages`)
+3. Develop REST APIs (`/claims`, `/status`, `/documents`)
+4. Configure dependency injection for service layer
+5. Implement authentication (Azure AD B2C for claimants, Azure AD for specialists)
+6. Add health checks and middleware
+
+### Phase 3: Application Services Layer
+1. Develop `ClaimsService` for workflow orchestration
+2. Implement `OcrService` with Azure Computer Vision integration
+3. Create `DocumentAnalysisService` for validation
+4. Build `RulesEngineService` for policy validation
+5. Develop `MlScoringService` for fraud detection
+6. Implement `NotificationService` with Azure Communication Services
+7. Implement repository pattern for data access using EF Core
+
+### Phase 4: Data Layer
+1. **Design SQL database schema**
+   - Claims table (ClaimId, PolicyId, Status, SubmittedDate, etc.)
+   - Documents table (DocumentId, ClaimId, BlobUri, Type)
+   - Decisions table (DecisionId, ClaimId, Status, Score, Reason)
+   - Notifications table (NotificationId, ClaimId, Type, SentDate)
+
+2. **Implement Entity Framework Core**
+   - Models and DbContext
+   - Repository pattern for data access
+
+3. **Set up Blob Storage containers**
+   - raw-docs
+   - processed-docs
+
+4. **Implement caching strategy** with Redis (optional)
+
+### Phase 5: Processing Pipeline Components
+1. **Build OCR extraction logic**
+   - Integrate Azure Computer Vision SDK for OCR extraction in `Claims.OCR`
+
+2. **Build rules validation engine**
+   - Implement business policy checks in `Claims.Rules`
+
+3. **Implement ML scoring**
+   - Use Azure ML or ML.NET for fraud/approval scoring
+   - Document classification in `Claims.Analytics`
+
+4. **Create decision logic**
+   - Implement decision routing logic to classify claims as AutoApprove/Reject/ManualReview
+
+### Phase 6: Frontend Development
+1. **Build conversational flow**
+   - Implement Bot Framework SDK with Web Chat UI
+
+2. **Create Specialist Portal**
+   - Manual review with feedback loop
+   - Document viewer
+   - Decision override UI
+
+3. **Implement notifications**
+   - Azure Communication Services email notifications for status updates
+
+### Phase 7: Testing & Optimization
+1. Unit testing for all services
+2. Integration testing for end-to-end flows
+3. Load testing with Azure Load Testing
+4. Performance optimization (caching, indexing)
+
+### Phase 8: Deployment & Monitoring
+1. Set up CI/CD pipeline (Azure DevOps or GitHub Actions)
+2. Configure deployment slots for staging/production
+3. Implement monitoring and alerting
+4. Create runbooks for incident response
+
+---
+
+## Database Schema
+
+### Claims Table
+```sql
+CREATE TABLE Claims (
+    ClaimId UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    PolicyId NVARCHAR(50) NOT NULL,
+    ClaimantId NVARCHAR(100) NOT NULL,
+    Status NVARCHAR(50) NOT NULL, -- Submitted, Processing, AutoApproved, Rejected, ManualReview
+    SubmittedDate DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+    LastUpdatedDate DATETIME2 NOT NULL,
+    TotalAmount DECIMAL(18,2),
+    FraudScore DECIMAL(5,2),
+    ApprovalScore DECIMAL(5,2),
+    AssignedSpecialistId NVARCHAR(100) NULL,
+    INDEX IX_Claims_Status (Status),
+    INDEX IX_Claims_SubmittedDate (SubmittedDate)
+);
+
+----------------------------------------------------------------
+
+CREATE TABLE Documents (
+    DocumentId UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    ClaimId UNIQUEIDENTIFIER NOT NULL,
+    DocumentType NVARCHAR(50) NOT NULL, -- Invoice, Receipt, MedicalReport, etc.
+    BlobUri NVARCHAR(500) NOT NULL,
+    UploadedDate DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+    OcrStatus NVARCHAR(50), -- Pending, Completed, Failed
+    OcrConfidence DECIMAL(5,2),
+    ProcessedBlobUri NVARCHAR(500) NULL,
+    FOREIGN KEY (ClaimId) REFERENCES Claims(ClaimId)
+);
+
+----------------------------------------------------------------
+
+CREATE TABLE Decisions (
+    DecisionId UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    ClaimId UNIQUEIDENTIFIER NOT NULL,
+    DecisionStatus NVARCHAR(50) NOT NULL, -- AutoApprove, Reject, ManualReview
+    DecisionDate DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+    Reason NVARCHAR(MAX),
+    DecidedBy NVARCHAR(100), -- System or SpecialistId
+    FraudScore DECIMAL(5,2),
+    ApprovalScore DECIMAL(5,2),
+    FOREIGN KEY (ClaimId) REFERENCES Claims(ClaimId)
+);
+
+------------------------------------------------------------------
+
+CREATE TABLE Notifications (
+    NotificationId UNIQUEIDENTIFIER PRIMARY KEY DEFAULT NEWID(),
+    ClaimId UNIQUEIDENTIFIER NOT NULL,
+    RecipientEmail NVARCHAR(255) NOT NULL,
+    NotificationType NVARCHAR(50) NOT NULL, -- ClaimReceived, StatusUpdate, DecisionMade
+    SentDate DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+    Status NVARCHAR(50) NOT NULL, -- Sent, Failed, Pending
+    MessageBody NVARCHAR(MAX),
+    FOREIGN KEY (ClaimId) REFERENCES Claims(ClaimId)
+);
+
+API Endpoints
+Claims API
+Submit Claim
+
+POST /api/claims
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "policyId": "POL-12345",
+  "claimantId": user@example.com,
+  "totalAmount": 1500.00,
+  "documents": [
+    {
+      "documentType": "Invoice",
+      "base64Content": "..."
+    }
+  ]
+}
+
+Response: 201 Created
+{
+  "claimId": "guid",
+  "status": "Submitted",
+  "submittedDate": "2025-12-10T10:00:00Z"
+}
+
+---------------------------------------------------------------------------------------------------------------------
+Get Claim Status
+
+GET /api/claims/{claimId}/status
+Authorization: Bearer {token}
+
+Response: 200 OK
+{
+  "claimId": "guid",
+  "status": "Processing",
+  "lastUpdated": "2025-12-10T10:05:00Z",
+  "fraudScore": 0.15,
+  "approvalScore": 0.85
+}
+
+
+---------------------------------------------------------------------------------------------------------------------
+Get Claim History
+
+GET /api/claims/{claimId}/history
+Authorization: Bearer {token}
+
+Response: 200 OK
+{
+  "claimId": "guid",
+  "events": [
+    {
+      "eventType": "Submitted",
+      "timestamp": "2025-12-10T10:00:00Z"
+    },
+    {
+      "eventType": "OCRCompleted",
+      "timestamp": "2025-12-10T10:02:00Z"
+    }
+  ]
+}
+
+---------------------------------------------------------------------------------------------------------------------
+Update Claim (Manual Review)
+
+PUT /api/claims/{claimId}
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "status": "Approved",
+  "specialistId": specialist@company.com,
+  "comments": "Manually approved after review"
+}
+
+Response: 200 OK
+
+
+API Endpoints
+Claims API
+Submit Claim
+
+POST /api/claims
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "policyId": "POL-12345",
+  "claimantId": user@example.com,
+  "totalAmount": 1500.00,
+  "documents": [
+    {
+      "documentType": "Invoice",
+      "base64Content": "..."
+    }
+  ]
+}
+
+Response: 201 Created
+{
+  "claimId": "guid",
+  "status": "Submitted",
+  "submittedDate": "2025-12-10T10:00:00Z"
+}
+
+---------------------------------------------------------------------------------------------------------------------
+Get Claim Status
+
+GET /api/claims/{claimId}/status
+Authorization: Bearer {token}
+
+Response: 200 OK
+{
+  "claimId": "guid",
+  "status": "Processing",
+  "lastUpdated": "2025-12-10T10:05:00Z",
+  "fraudScore": 0.15,
+  "approvalScore": 0.85
+}
+
+
+---------------------------------------------------------------------------------------------------------------------
+Get Claim History
+
+GET /api/claims/{claimId}/history
+Authorization: Bearer {token}
+
+Response: 200 OK
+{
+  "claimId": "guid",
+  "events": [
+    {
+      "eventType": "Submitted",
+      "timestamp": "2025-12-10T10:00:00Z"
+    },
+    {
+      "eventType": "OCRCompleted",
+      "timestamp": "2025-12-10T10:02:00Z"
+    }
+  ]
+}
+
+---------------------------------------------------------------------------------------------------------------------
+Update Claim (Manual Review)
+
+PUT /api/claims/{claimId}
+Authorization: Bearer {token}
+Content-Type: application/json
+
+{
+  "status": "Approved",
+  "specialistId": specialist@company.com,
+  "comments": "Manually approved after review"
+}
+
+Response: 200 OK
+
+
+
+
+
+Deployment Unit	Components Included	Azure Resource	Scaling Strategy
+Claims.Api	API Gateway, Application Services, Bot endpoint	Azure App Service (P1v2+)	Horizontal auto-scale based on CPU/memory
+Background Workers	OCR Worker, ML Worker, Notification Worker	Azure Functions (Premium Plan) or App Service	Queue length-based scaling
+Database	Claims SQL Database	Azure SQL Database (S3+)	Vertical scaling, Read replicas
+Blob Storage	Document storage	Azure Blob Storage (Standard)	Auto-scale (managed by Azure)
+ML Models	Fraud/Approval models	Azure Machine Learning endpoint	Auto-scale based on requests
+
+
+Claims.Api → Azure Service Bus Queue → Azure Function (OCR Worker)
+                                    → Azure Function (Rules Worker)
+                                    → Azure Function (ML Scoring Worker)
+                                    → Azure Function (Notification Worker)
+
+
+Security & Compliance
+Authentication & Authorization
+•	Claimants: Azure AD B2C with OAuth 2.0/OIDC
+•	Specialists: Azure AD with role-based access control (RBAC)
+•	API Security: JWT token validation, CORS policies, rate limiting
+Data Protection
+•	Encryption at Rest: Azure SQL TDE, Blob Storage encryption
+•	Encryption in Transit: TLS 1.2+ for all communications
+•	Secrets Management: Azure Key Vault for connection strings and API keys
+•	Data Masking: PII data masking for sensitive fields
+Compliance
+•	HIPAA: PHI data masking, audit logging, access controls
+•	PCI DSS: Tokenization for payment data (if applicable)
+•	GDPR: Data retention policies, right to erasure
+Monitoring & Auditing
+•	Application Insights: Request tracking, dependency monitoring, exception logging
+•	Azure Monitor: Infrastructure health and alerts
+•	Audit Logs: All claim decisions and modifications logged
+•	Distributed Tracing: Correlation IDs across services
+________________________________________
+Modular Component Tables
+1. Frontend Layer
+Component	Technology	Purpose	Key Features	Dependencies
+Bot Web Chat UI	Bot Framework Web Chat SDK (React)	Conversational interface for claimants	- File upload widget<br>- Chat history<br>- Status display<br>- Multi-turn conversations	Bot Framework Connector, Claims.Api
+Specialist Portal	Blazor Server/WASM or React SPA	Manual review dashboard for specialists	- Claim queue management<br>- Document viewer<br>- Decision override UI<br>- Analytics dashboard	Claims.Api, Azure AD authentication
+2. API Gateway Layer
+Component	Technology	Purpose	Key Features	Dependencies
+Claims.Api	ASP.NET Core 8.0 Web API (Azure App Service)	Central API gateway and orchestration	- REST endpoints (/claims, /status, /documents)<br>- Bot Framework endpoint (/api/messages)<br>- Request validation<br>- Authentication/Authorization<br>- Rate limiting	Application Services Layer, Azure AD B2C, Bot Service
+3. Application Services Layer
+Component	Technology	Purpose	Key Features	Dependencies
+ClaimsService	C# Class Library	Core claim orchestration and workflow	- Claim submission workflow<br>- State management<br>- Pipeline coordination<br>- Business logic orchestration	All other services, Repository Layer
+OcrService	C# Class Library	Document OCR processing coordination	- Azure Vision API integration<br>- Batch processing support<br>- Error handling and retry<br>- Result caching	Azure Computer Vision, Blob Storage
+DocumentAnalysisService	C# Class Library	Document validation and classification	- Document type detection<br>- Content validation<br>- Quality checks<br>- Metadata extraction	OcrService, ML models
+RulesEngineService	C# Class Library	Business rules and policy validation	- Policy coverage validation<br>- Deductible calculations<br>- Eligibility checks<br>- Rule configuration management	Repository Layer, Claims domain models
+MlScoringService	C# Class Library	ML-based fraud and approval scoring	- Fraud detection scoring<br>- Approval probability calculation<br>- Model versioning<br>- Feature engineering	Azure ML endpoint or ML.NET, DocumentAnalysisService
+NotificationService	C# Class Library	Multi-channel notification handling	- Email composition<br>- Template management<br>- Delivery tracking<br>- Notification preferences	Azure Communication Services, Repository Layer
+4. Processing Components
+Component	Technology	Purpose	Key Features	Dependencies
+Claims.OCR	Azure Computer Vision / Document Intelligence	Text extraction from claim documents	- OCR text extraction<br>- Confidence scoring<br>- Multi-language support<br>- Structured data extraction	Azure Cognitive Services, Blob Storage
+Claims.Rules	Custom Rules Engine or Logic Apps	Policy and business rule validation	- Configurable rule sets<br>- Rule evaluation engine<br>- Decision logging<br>- Rule versioning	ClaimsService, SQL Database (rule configs)
+Claims.Analytics	Azure ML / ML.NET	ML-based document classification and scoring	- Document type classification<br>- Fraud detection model<br>- Approval score model<br>- Model retraining pipeline	Azure Machine Learning, ML models, feature store
+Decision.Logic	C# Business Logic Component	Final decision routing and status assignment	- Multi-criteria decision logic<br>- Threshold configuration<br>- Status assignment (AutoApprove/Reject/ManualReview)<br>- Audit logging	RulesEngineService, MlScoringService, Repository Layer
+5. Data Access Layer
+Component	Technology	Purpose	Key Features	Dependencies
+Repository Layer	Entity Framework Core 8.0	Data access abstraction	- CRUD operations<br>- Transaction management<br>- Query optimization<br>- Unit of Work pattern	Azure SQL Database
+Blob Storage Manager	Azure.Storage.Blobs SDK	Document storage management	- Upload/download operations<br>- Container management<br>- SAS token generation<br>- Lifecycle policies	Azure Blob Storage
+Cache Manager	StackExchange.Redis	Distributed caching layer	- Claim status caching<br>- User session data<br>- Frequently accessed lookups<br>- Cache invalidation	Azure Redis Cache
+6. Domain Models
+Component	Type	Purpose	Key Entities	Dependencies
+Claims.Domain	C# Class Library	Core business entities and value objects	- Claim<br>- Document<br>- Decision<br>- Notification<br>- ClaimStatus enum<br>- PolicyInfo	None (pure domain)
+Claims.Contracts	C# Class Library	DTOs and API contracts	- ClaimSubmissionDto<br>- ClaimStatusDto<br>- DocumentDto<br>- DecisionDto	Claims.Domain
+7. Infrastructure Layer
+Component	Technology	Purpose	Key Features	Dependencies
+Logging Module	Serilog + Application Insights	Structured logging and telemetry	- Structured logging<br>- Correlation IDs<br>- Performance metrics<br>- Error tracking	Application Insights SDK
+Configuration Module	Azure App Configuration + Key Vault	Centralized configuration and secrets	- Feature flags<br>- Secret management<br>- Environment-specific configs<br>- Dynamic updates	Azure Key Vault, App Configuration
+Authentication Module	Azure AD B2C / Azure AD	Identity and access management	- OAuth 2.0/OIDC flows<br>- JWT validation<br>- Role-based access control<br>- Multi-tenant support	Microsoft.Identity.Web
+Resilience Module	Polly	Transient fault handling	- Retry policies<br>- Circuit breaker<br>- Timeout policies<br>- Bulkhead isolation	Polly NuGet package
+8. Data Storage Components
+Component	Technology	Purpose	Schema/Structure	Access Pattern
+Claims Database	Azure SQL Database	Relational data storage	- Claims table (ClaimId, PolicyId, Status, SubmittedDate, etc.)<br>- Documents table (DocumentId, ClaimId, BlobUri, Type)<br>- Decisions table (DecisionId, ClaimId, Status, Score, Reason)<br>- Notifications table (NotificationId, ClaimId, Type, SentDate)	EF Core, Indexed queries
+Blob Storage - raw-docs	Azure Blob Storage	Original uploaded documents	- Container: raw-docs<br>- Naming: {claimId}/{documentId}.{ext}	Direct SDK access
+Blob Storage - processed-docs	Azure Blob Storage	OCR-processed documents with annotations	- Container: processed-docs<br>- Naming: {claimId}/{documentId}_processed.json	Direct SDK access
+9. Communication Components
+Component	Technology	Purpose	Key Features	Dependencies
+Email Service	Azure Communication Services	Email delivery	- HTML email templates<br>- Attachment support<br>- Delivery status tracking<br>- Bounce handling	Azure Communication Services SDK
+SMS Service (Optional)	Azure Communication Services	SMS notifications	- Short message delivery<br>- Status updates<br>- OTP delivery	Azure Communication Services SDK
+10. Background Processing (Recommended Addition)
+Component	Technology	Purpose	Key Features	Dependencies
+OCR Worker	Azure Functions or Background Service	Asynchronous OCR processing	- Queue-triggered processing<br>- Batch processing<br>- Error handling<br>- Status updates	Azure Service Bus, OcrService
+ML Scoring Worker	Azure Functions or Background Service	Asynchronous ML scoring	- Model inference<br>- Feature calculation<br>- Score persistence	Azure Service Bus, MlScoringService
+Notification Worker	Azure Functions or Background Service	Asynchronous notification sending	- Email/SMS queuing<br>- Retry logic<br>- Delivery tracking	Azure Service Bus, NotificationService
+11. Monitoring & DevOps Components
+Component	Technology	Purpose	Key Features	Dependencies
+Application Insights	Azure Application Insights	APM and monitoring	- Request tracking<br>- Dependency tracking<br>- Exception logging<br>- Custom metrics	Azure Monitor
+Health Checks	ASP.NET Core Health Checks	Service health monitoring	- Database connectivity<br>- External service availability<br>- Custom health probes	Microsoft.Extensions.Diagnostics.HealthChecks
+CI/CD Pipeline	Azure DevOps / GitHub Actions	Automated deployment	- Build automation<br>- Unit/integration tests<br>- Infrastructure provisioning<br>- Multi-environment deployment	Azure Resource Manager
+12. Security Components
+Component	Technology	Purpose	Key Features	Dependencies
+API Security Middleware	ASP.NET Core Middleware	Request security	- JWT validation<br>- CORS policy<br>- Request sanitization<br>- Rate limiting	Microsoft.Identity.Web
+Data Protection	Azure SQL TDE + Blob Encryption	Data encryption	- Encryption at rest<br>- Encryption in transit<br>- Key rotation	Azure Key Vault
+Secrets Manager	Azure Key Vault	Secrets and certificate management	- Secret storage<br>- Managed identities<br>- Access policies<br>- Audit logging	Azure.Security.KeyVault
+________________________________________
+Production Readiness
+Missing Components for Production
+1. Security & Compliance
+•	❌ WAF/DDoS Protection: Add Azure Front Door or Application Gateway with WAF
+•	❌ Data Encryption: Implement encryption at rest (TDE for SQL, blob encryption) and in transit (TLS 1.2+)
+•	❌ HIPAA/PCI Compliance: Add audit logging, data masking for sensitive fields
+•	❌ Identity Management: Azure AD B2C for claimants, RBAC for specialists
+2. Resilience & Reliability
+•	❌ Message Queue: Add Azure Service Bus for asynchronous processing to handle spikes
+•	❌ Circuit Breaker: Implement Polly policies for external service calls
+•	❌ Retry Logic: Exponential backoff for transient failures
+•	❌ Dead Letter Queue: For failed processing attempts
+•	❌ Health Checks: Implement /health endpoint for App Service
+3. Observability
+•	❌ Distributed Tracing: Application Insights correlation IDs across services
+•	❌ Structured Logging: Serilog with log correlation
+•	❌ Alerting: Azure Monitor alerts for errors, latency, failed jobs
+•	❌ Dashboard: Azure Dashboard or Grafana for real-time metrics
+4. Data Management
+•	❌ Backup Strategy: Automated backups for SQL (point-in-time restore) and Blob (soft delete)
+•	❌ Data Retention Policies: Archive/delete old claims per compliance requirements
+•	❌ Data Partitioning: Partition SQL tables by date for performance
+•	❌ CDC (Change Data Capture): For audit trail and analytics
+5. Performance & Scalability
+•	❌ Caching Layer: Azure Redis for frequently accessed claims
+•	❌ CDN: Azure Front Door for static content
+•	❌ Auto-scaling: Configure App Service auto-scale rules
+•	❌ Async Processing: Move OCR and ML scoring to background jobs (Azure Functions or Service Bus)
+•	❌ Database Indexing: Optimize queries with proper indexes
+6. Testing & Quality
+•	❌ Integration Tests: Test end-to-end flows
+•	❌ Load Testing: Azure Load Testing for scalability validation
+•	❌ Chaos Engineering: Test failure scenarios
+7. DevOps & Deployment
+•	❌ CI/CD Pipeline: Automated build, test, deploy
+•	❌ Infrastructure as Code: ARM templates, Bicep, or Terraform
+•	❌ Blue-Green Deployment: Zero-downtime deployments
+•	❌ Feature Flags: Azure App Configuration for controlled rollouts
+8. Business Continuity
+•	❌ Disaster Recovery: Multi-region deployment with failover
+•	❌ Geo-Redundancy: SQL Database geo-replication, RA-GRS for blobs
+•	❌ Runbooks: Incident response procedures
+9. User Experience Enhancements
+•	❌ Real-time Updates: SignalR for live claim status updates in specialist portal
+•	❌ File Upload Validation: Client-side and server-side file type/size checks
+•	❌ Progress Indicators: Show OCR/processing progress to users
+•	❌ Multi-language Support: Localization for bot and notifications
+10. Advanced Features
+•	❌ Audit Trail: Complete history of claim modifications and decisions
+•	❌ Analytics Dashboard: Power BI integration for business insights
+•	❌ Fraud Patterns: ML model retraining pipeline with feedback loops
+•	❌ SLA Monitoring: Track time-to-decision metrics
+•	❌ Document Versioning: Track document updates and amendments
+Recommended Architecture Enhancements
+Asynchronous Processing Architecture
+•	
+•	
+•	
+•	
+Benefits: Decoupling, scalability, retry handling, better resource utilization
+Event-Driven Pattern
+•	Add Event Grid for domain events (ClaimSubmitted, ClaimApproved, DocumentProcessed)
+•	Enable reactive workflows and integrations
+CQRS Pattern (for high-scale scenarios)
+•	Separate read and write models
+•	Use Cosmos DB for read-optimized views
+•	Event sourcing for complete audit trail
+Production Readiness Checklist
+Security
+•	 Implement WAF/DDoS protection (Azure Front Door)
+•	 Configure Azure Key Vault for secrets
+•	 Enable Azure AD B2C authentication
+•	 Implement RBAC for specialist portal
+•	 Enable SQL Database TDE and blob encryption
+Resilience
+•	 Add Azure Service Bus for async processing
+•	 Implement Polly retry/circuit breaker policies
+•	 Set up dead letter queue for failed jobs
+•	 Configure health check endpoints
+Observability
+•	 Set up Application Insights with correlation IDs
+•	 Implement structured logging with Serilog
+•	 Create Azure Monitor alerts for errors/latency
+•	 Build operational dashboards
+Performance
+•	 Implement Redis caching layer
+•	 Optimize SQL queries with proper indexing
+•	 Configure App Service auto-scaling rules
+•	 Move heavy processing to background workers
+DevOps
+•	 Create CI/CD pipeline (Azure DevOps/GitHub Actions)
+•	 Implement Infrastructure as Code (Bicep/Terraform)
+•	 Set up blue-green deployment strategy
+•	 Configure feature flags with App Configuration
+Business Continuity
+•	 Configure SQL geo-replication
+•	 Enable blob storage RA-GRS
+•	 Create disaster recovery runbooks
+•	 Implement automated backups
+________________________________________
+Cost Optimization
+1.	App Service: Use Reserved Instances for 30-40% savings
+2.	SQL Database: Use Elastic Pool for multiple databases
+3.	Blob Storage: Configure Hot/Cool/Archive tiers based on access patterns
+4.	Computer Vision: Batch processing to optimize API calls
+5.	Azure Functions: Use Consumption plan for variable workloads
+6.	Monitoring: Set data retention policies to control costs
+________________________________________
+Next Steps
+1.	Review and approve this architecture design
+2.	Set up Azure subscription and resource groups
+3.	Create development environment with IaC (Bicep/Terraform)
+4.	Begin Phase 1 infrastructure provisioning
+5.	Establish development workflow and branching strategy
+6.	Set up CI/CD pipeline for automated deployments
+7.	Implement core services starting with Claims.Api
+8.	Develop processing pipeline components
+9.	Build frontend interfaces (Bot + Specialist Portal)
+10.	Conduct testing and performance optimization
+________________________________________
+References
+•	Azure Bot Service Documentation
+•	Azure Computer Vision API
+•	ASP.NET Core Best Practices
+•	Azure Architecture Center
+•	Entity Framework Core Documentation
+•	Azure Communication Services
+•	Polly Resilience Framework
+________________________________________
+Version History
+Version	Date	Author	Changes
+1.0	2025-12-10	Architecture Team	Initial architecture draft with complete component breakdown
+________________________________________
+Appendix: Component Summary
+Total Component Count
+•	Frontend Components: 2
+•	API Gateway: 1
+•	Application Services: 6
+•	Processing Components: 4
+•	Data Storage: 3
+•	Communication: 1-2 (Email, optional SMS)
+•	Infrastructure: 4
+•	Background Workers: 3 (recommended)
+•	Monitoring & DevOps: 3
+•	Security: 3
+Total Core Components: ~30 modular components
+Technology Summary
+•	Primary Language: C# / .NET 8.0
+•	Cloud Platform: Microsoft Azure
+•	Database: Azure SQL Database
+•	Storage: Azure Blob Storage
+•	AI/ML: Azure Cognitive Services, Azure ML
+•	Bot Framework: Microsoft Bot Framework v4
+•	Authentication: Azure AD, Azure AD B2C
+•	Monitoring: Application Insights, Azure Monitor
+•	CI/CD: Azure DevOps or GitHub Actions
+________________________________________
+End of Document
+
+
+
