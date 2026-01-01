@@ -175,6 +175,8 @@ public class ClaimsController : ControllerBase
             return StatusCode(500, new { error = "An error occurred while processing the claim" });
         }
     }
+
+    
 }
 
 public class UpdateClaimStatusRequest

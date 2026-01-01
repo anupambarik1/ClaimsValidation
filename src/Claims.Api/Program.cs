@@ -1,8 +1,10 @@
 using Claims.Infrastructure.Data;
 using Claims.Services.Azure;
+using Claims.Services.Aws;
 using Claims.Services.Implementations;
 using Claims.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
+using Amazon.Textract;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -36,20 +38,17 @@ builder.Services.AddDbContext<ClaimsDbContext>(options =>
 
 // Register Core Application Services
 builder.Services.AddScoped<IClaimsService, ClaimsService>();
-builder.Services.AddScoped<IDocumentAnalysisService, DocumentAnalysisService>();
+builder.Services.AddScoped<IDocumentAnalysisService, AWSTextractDocumentIntelligenceService>();
 builder.Services.AddScoped<IRulesEngineService, RulesEngineService>();
 builder.Services.AddSingleton<IMlScoringService, MlScoringService>(); // Singleton to keep ML model loaded
 builder.Services.AddScoped<INotificationService, NotificationService>();
 
-// Register OCR Service - Choose based on configuration
-var useAzureDocumentIntelligence = builder.Configuration.GetValue<bool>("FeatureFlags:UseAzureDocumentIntelligence");
-if (useAzureDocumentIntelligence)
+// Register AWS Document Intelligence Service (Textract with advanced features)
+var useAwsTextractIntelligence = builder.Configuration.GetValue<bool>("AWS:Textract:Enabled");
+if (useAwsTextractIntelligence)
 {
-    builder.Services.AddScoped<IOcrService, AzureDocumentIntelligenceService>();
-}
-else
-{
-    builder.Services.AddScoped<IOcrService, OcrService>(); // Tesseract fallback
+    builder.Services.AddScoped<AWSTextractDocumentIntelligenceService>();
+    builder.Services.AddScoped<IOcrService, AWSTextractService>();
 }
 
 // Determine provider preference using feature flags or fallback to CloudProvider
@@ -224,8 +223,7 @@ app.MapGet("/api", () => Results.Ok(new
     version = "1.0.0",
     description = "AI-powered claims validation with real-time fraud detection",
     platform = "Azure",
-    endpoints = new
-    {
+    endpoints = new {
         submitClaim = "POST /api/claims",
         processClaim = "POST /api/claims/{claimId}/process",
         submitAndProcess = "POST /api/claims/submit-and-process",

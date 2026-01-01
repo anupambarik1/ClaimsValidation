@@ -81,6 +81,11 @@ public class ClaimsService : IClaimsService
         
         try
         {
+
+            // Step 2: Classify document
+            var sampleClaimsPDFExtractedTextByAWSTextract = await _documentAnalysisService.AnalyzeDocumentWithStructureAsync("s3://claims-documents-validation/claims_invoice.pdf");
+
+
             var claim = await _context.Claims
                 .Include(c => c.Documents)
                 .FirstOrDefaultAsync(c => c.ClaimId == claimId);

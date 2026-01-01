@@ -1,5 +1,6 @@
 using Claims.Domain.Entities;
 using Claims.Domain.Enums;
+using Claims.Services.Aws;
 using Claims.Services.Interfaces;
 using System.Text.RegularExpressions;
 
@@ -257,6 +258,11 @@ public class DocumentAnalysisService : IDocumentAnalysisService
         // Remove common stop words
         var stopWords = new HashSet<string> { "the", "a", "an", "and", "or", "but", "in", "on", "at", "to", "for", "of", "is", "it" };
         return tokens.Where(t => t.Length > 2 && !stopWords.Contains(t)).ToHashSet();
+    }
+
+    public Task<DocumentIntelligenceResult> AnalyzeDocumentWithStructureAsync(string blobUri)
+    {
+        throw new NotImplementedException();
     }
 }
 
