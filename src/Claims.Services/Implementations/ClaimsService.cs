@@ -50,8 +50,27 @@ public class ClaimsService : IClaimsService
             TotalAmount = submission.TotalAmount,
             Status = ClaimStatus.Submitted,
             SubmittedDate = DateTime.UtcNow,
-            LastUpdatedDate = DateTime.UtcNow
+            LastUpdatedDate = DateTime.UtcNow,
+            Documents = new List<Document>()
         };
+
+        // Add documents to the claim
+        foreach (var doc in submission.Documents)
+        {
+            var document = new Document
+            {
+                DocumentId = Guid.NewGuid(),
+                ClaimId = claim.ClaimId,
+                DocumentType = doc.DocumentType,
+                BlobUri = doc.FilePath, // Use original file path for Textract/OCR processing
+                UploadedDate = DateTime.UtcNow,
+                OcrStatus = OcrStatus.Pending
+            };
+            
+            claim.Documents.Add(document);
+            _logger.LogInformation("Document added to claim {ClaimId}: Type={DocumentType}, Path={FilePath}", 
+                claim.ClaimId, doc.DocumentType, doc.FilePath);
+        }
 
         _context.Claims.Add(claim);
         await _context.SaveChangesAsync();

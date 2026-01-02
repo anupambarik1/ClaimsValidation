@@ -160,6 +160,41 @@ public class ClaimsController : ControllerBase
     {
         try
         {
+            // Step 0: Server-side file reading - Convert file paths to base64
+            // This avoids large payloads and handles file reading on the server
+            foreach (var doc in submission.Documents)
+            {
+                if (string.IsNullOrWhiteSpace(doc.FilePath))
+                {
+                    return BadRequest(new { error = $"File path is required for document" });
+                }
+
+                if (!System.IO.File.Exists(doc.FilePath))
+                {
+                    return BadRequest(new { error = $"File not found at path: {doc.FilePath}" });
+                }
+
+                try
+                {
+                    // Read file bytes from disk
+                    var fileBytes = System.IO.File.ReadAllBytes(doc.FilePath);
+                    
+                    // Convert to base64 for internal processing
+                    var base64Content = Convert.ToBase64String(fileBytes);
+                    
+                    // Store base64 in the DTO for internal use
+                    doc.Base64Content = base64Content;
+                    
+                    _logger.LogInformation("Document loaded from file: {FilePath}, Size: {FileSize} bytes", 
+                        doc.FilePath, fileBytes.Length);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Error reading file from path: {FilePath}", doc.FilePath);
+                    return BadRequest(new { error = $"Error reading file: {ex.Message}" });
+                }
+            }
+
             // Step 1: Submit the claim
             var submitResult = await _claimsService.SubmitClaimAsync(submission);
             _logger.LogInformation("Claim {ClaimId} submitted, starting processing", submitResult.ClaimId);

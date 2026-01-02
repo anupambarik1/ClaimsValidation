@@ -13,6 +13,6 @@ public class ClaimSubmissionDto
 public class DocumentUploadDto
 {
     public DocumentType DocumentType { get; set; }
-    public string FileName { get; set; } = string.Empty;
-    public string Base64Content { get; set; } = string.Empty;
+    public string FilePath { get; set; } = string.Empty;
+    public string Base64Content { get; set; } = string.Empty; // Set by controller after reading file
 }

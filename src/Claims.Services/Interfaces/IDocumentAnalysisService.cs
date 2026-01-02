@@ -9,4 +9,5 @@ public interface IDocumentAnalysisService
     Task<bool> ValidateDocumentContentAsync(Document document);
 
     Task<DocumentIntelligenceResult> AnalyzeDocumentWithStructureAsync(string blobUri);
+
 }

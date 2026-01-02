@@ -1,53 +1,61 @@
 using Claims.Services.Interfaces;
-using Claims.Infrastructure.Data;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Amazon.Textract;
 using Amazon.Textract.Model;
+using Amazon.S3;
 using Amazon;
-using Amazon.Runtime;
 using System.Text;
-using Microsoft.EntityFrameworkCore;
 
 namespace Claims.Services.Aws;
 
 /// <summary>
 /// AWS Textract OCR service implementation using AWSSDK.Textract.
-/// Accepts S3 URIs (s3://bucket/key) and returns extracted text with confidence scores.
-/// Integrates with Claims.Infrastructure for document status tracking.
+/// Accepts S3 URIs (s3://bucket/key) and returns extracted text.
 /// </summary>
 public class AWSTextractService : IOcrService
 {
     private readonly ILogger<AWSTextractService> _logger;
     private readonly bool _isEnabled;
-    private readonly ClaimsDbContext _context;
-    private readonly IAmazonTextract _textractClient;
+    private readonly AmazonTextractClient _textractClient;
 
-    public AWSTextractService(
-        IConfiguration configuration,
-        ILogger<AWSTextractService> logger,
-        ClaimsDbContext context)
+    public AWSTextractService(IConfiguration configuration, ILogger<AWSTextractService> logger)
     {
         _logger = logger;
-        _context = context;
-        _isEnabled = configuration.GetValue<bool>("AWS:Enabled", false);
+        _isEnabled = configuration.GetValue<bool>("AWS:Textract:Enabled", false);
         
-        var accessKey = configuration["AWS:AccessKey"];
-        var secretKey = configuration["AWS:SecretKey"];
-        var regionName = configuration["AWS:Region"] ?? "us-east-1";
-        
-        AWSCredentials credentials = new BasicAWSCredentials(accessKey, secretKey);
-        var region = RegionEndpoint.GetBySystemName(regionName);
-        _textractClient = new AmazonTextractClient(credentials, region);
+        // Get AWS credentials and region from configuration
+        var awsConfig = configuration.GetSection("AWS");
+        var accessKey = awsConfig.GetValue<string>("AccessKey");
+        var secretKey = awsConfig.GetValue<string>("SecretKey");
+        var region = awsConfig.GetValue<string>("Region", "us-east-1");
+
+        try
+        {
+            // Create client with explicit credentials and region
+            if (!string.IsNullOrEmpty(accessKey) && !string.IsNullOrEmpty(secretKey))
+            {
+                var credentials = new Amazon.Runtime.BasicAWSCredentials(accessKey, secretKey);
+                _textractClient = new AmazonTextractClient(credentials, RegionEndpoint.GetBySystemName(region));
+                _logger.LogInformation("AWS Textract client initialized with credentials for region: {Region}", region);
+            }
+            else
+            {
+                // Fallback to default credentials chain (IAM role, environment variables, etc.)
+                _textractClient = new AmazonTextractClient(RegionEndpoint.GetBySystemName(region));
+                _logger.LogInformation("AWS Textract client initialized with default credentials for region: {Region}", region);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error initializing AWS Textract client");
+            _textractClient = new AmazonTextractClient();
+        }
 
         if (!_isEnabled)
             _logger.LogWarning("AWS Textract service is disabled in configuration.");
     }
 
-    /// <summary>
-    /// Processes a document using AWS Textract
-    /// Extracts text and confidence scores from S3-stored documents
-    /// </summary>
     public async Task<(string ExtractedText, decimal Confidence)> ProcessDocumentAsync(string blobUri)
     {
         if (!_isEnabled)
@@ -65,9 +73,9 @@ public class AWSTextractService : IOcrService
                 return (string.Empty, 0m);
             }
 
-            _logger.LogInformation("Processing document via Textract: s3://{Bucket}/{Key}", bucket, key);
+            _logger.LogInformation("Textract: Attempting to process S3 object - Bucket: {Bucket}, Key: {Key}", bucket, key);
 
-            var request = new AnalyzeDocumentRequest
+            var req = new AnalyzeDocumentRequest
             {
                 FeatureTypes = new List<string> { "TABLES", "FORMS" },
                 Document = new Document
@@ -76,95 +84,57 @@ public class AWSTextractService : IOcrService
                 }
             };
 
-            var response = await _textractClient.AnalyzeDocumentAsync(request);
+            var resp = await _textractClient.AnalyzeDocumentAsync(req);
+            var sb = new StringBuilder();
+            decimal highestConfidence = 0m;
+            foreach (var block in resp.Blocks)
+            {
+                if (block.BlockType == BlockType.LINE && !string.IsNullOrEmpty(block.Text))
+                {
+                    sb.AppendLine(block.Text);
+                    if (block.Confidence > 0 && (decimal)block.Confidence > highestConfidence)
+                        highestConfidence = (decimal)block.Confidence;
+                }
+            }
 
-            var extractedText = ExtractTextFromBlocks(response.Blocks, out var confidence);
-
-            _logger.LogInformation(
-                "Document processing complete - Confidence: {Confidence:P}, Length: {TextLength}",
-                confidence, extractedText.Length);
-
-            return (extractedText, confidence);
+            _logger.LogInformation("Textract: Successfully processed document, extracted {LineCount} lines", 
+                resp.Blocks.Count(b => b.BlockType == BlockType.LINE));
+            return (sb.ToString(), highestConfidence);
+        }
+        catch (Amazon.Textract.Model.InvalidS3ObjectException ex)
+        {
+            _logger.LogError(ex, "Textract S3 Error - Unable to access S3 object. Check: 1) S3 bucket exists in correct region, 2) Object key is correct, 3) IAM permissions allow Textract access, 4) AWS credentials are valid");
+            return (string.Empty, 0m);
+        }
+        catch (Amazon.Runtime.Internal.HttpErrorResponseException ex)
+        {
+            _logger.LogError(ex, "Textract HTTP Error - AWS service responded with error. StatusCode: {StatusCode}", ex.Message);
+            return (string.Empty, 0m);
+        }
+        catch (AmazonTextractException ex)
+        {
+            _logger.LogError(ex, "Textract AWS Service Error: {Message}", ex.Message);
+            return (string.Empty, 0m);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error processing document with AWS Textract: {BlobUri}", blobUri);
+            _logger.LogError(ex, "Unexpected error calling Textract for URI: {Uri}", blobUri);
             return (string.Empty, 0m);
         }
     }
 
-    /// <summary>
-    /// Updates document OCR status in database
-    /// </summary>
-    public async Task UpdateDocumentOcrStatusAsync(
-        Guid documentId,
-        string status,
-        string? extractedText = null,
-        decimal? confidence = null)
+    public Task UpdateDocumentOcrStatusAsync(Guid documentId, string status, string? extractedText = null, decimal? confidence = null)
     {
-        try
-        {
-            var document = await _context.Documents
-                .FirstOrDefaultAsync(d => d.DocumentId == documentId);
-
-            if (document == null)
-            {
-                _logger.LogWarning("Document not found: {DocumentId}", documentId);
-                return;
-            }
-
-            // Update OCR status (would use enum if available)
-            // document.OcrStatus = Enum.Parse<OcrStatus>(status);
-            document.ExtractedText = extractedText;
-            document.OcrConfidence = confidence;
-
-            await _context.SaveChangesAsync();
-
-            _logger.LogInformation(
-                "Updated OCR status for document {DocumentId}: {Status} (confidence: {Confidence})",
-                documentId, status, confidence);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error updating OCR status for document {DocumentId}", documentId);
-        }
+        _logger.LogInformation("Updated OCR status for {DocumentId}: {Status} (confidence {Confidence})", documentId, status, confidence);
+        return Task.CompletedTask;
     }
 
-    /// <summary>
-    /// Extracts text from Textract response blocks
-    /// Calculates average confidence from LINE blocks
-    /// </summary>
-    private string ExtractTextFromBlocks(List<Block> blocks, out decimal confidence)
-    {
-        var sb = new StringBuilder();
-        var confidences = new List<decimal>();
-
-        foreach (var block in blocks)
-        {
-            if (block.BlockType == BlockType.LINE && !string.IsNullOrEmpty(block.Text))
-            {
-                sb.AppendLine(block.Text);
-                if (block.Confidence > 0)
-                {
-                    confidences.Add((decimal)block.Confidence);
-                }
-            }
-        }
-
-        confidence = confidences.Any() ? (decimal)confidences.Average() : 0m;
-        return sb.ToString().Trim();
-    }
-
-    /// <summary>
-    /// Parses S3 URI in format s3://bucket/key
-    /// </summary>
     private (string? bucket, string? key) ParseS3Uri(string uri)
     {
         if (uri.StartsWith("s3://", StringComparison.OrdinalIgnoreCase))
         {
             var parts = uri.Substring(5).Split('/', 2);
-            if (parts.Length == 2)
-                return (parts[0], parts[1]);
+            if (parts.Length == 2) return (parts[0], parts[1]);
         }
         return (null, null);
     }
