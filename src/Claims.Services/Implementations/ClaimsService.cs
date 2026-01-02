@@ -5,6 +5,7 @@ using Claims.Infrastructure.Data;
 using Claims.Services.Interfaces;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Claims.Services.Implementations;
 
@@ -16,6 +17,7 @@ public class ClaimsService : IClaimsService
     private readonly IMlScoringService _mlScoringService;
     private readonly INotificationService _notificationService;
     private readonly IDocumentAnalysisService _documentAnalysisService;
+    private readonly INlpService _nlpService;
     private readonly ILogger<ClaimsService> _logger;
 
     public ClaimsService(
@@ -25,6 +27,7 @@ public class ClaimsService : IClaimsService
         IMlScoringService mlScoringService,
         INotificationService notificationService,
         IDocumentAnalysisService documentAnalysisService,
+        INlpService nlpService,
         ILogger<ClaimsService> logger)
     {
         _context = context;
@@ -33,6 +36,7 @@ public class ClaimsService : IClaimsService
         _mlScoringService = mlScoringService;
         _notificationService = notificationService;
         _documentAnalysisService = documentAnalysisService;
+        _nlpService = nlpService;
         _logger = logger;
     }
 
@@ -173,46 +177,70 @@ public class ClaimsService : IClaimsService
                 return result;
             }
 
+            // Step 2.5: NLP Analysis with Bedrock
+            _logger.LogInformation("Step 2.5: NLP Analysis");
+            var ocrText = ocrResults.FirstOrDefault()?.ExtractedText ?? string.Empty;
+            var summary = await _nlpService.SummarizeClaimAsync(
+                claim.TotalAmount.ToString(),
+                ocrText);
+
+            var fraudNarrativeJson = await _nlpService.AnalyzeFraudNarrativeAsync(summary);
+            var fraudNarrative = JsonSerializer.Deserialize<JsonElement>(fraudNarrativeJson);
+            var narrativeFraudScore = (decimal)fraudNarrative.GetProperty("riskScore").GetDouble();
+
+            var entitiesJson = await _nlpService.ExtractEntitiesAsync(ocrText);
+
+            result.NlpAnalysis = new NlpAnalysisResult
+            {
+                Summary = summary,
+                FraudRiskScore = narrativeFraudScore,
+                DetectedEntities = entitiesJson
+            };
+            
+            _logger.LogInformation("NLP Analysis completed: Fraud Risk Score={FraudRiskScore:P2}", narrativeFraudScore);
+
             // Step 4: ML-based fraud and approval scoring
             _logger.LogInformation("Step 3: ML Fraud Detection and Scoring");
             var (fraudScore, approvalScore) = await _mlScoringService.ScoreClaimAsync(claim);
             
-            claim.FraudScore = fraudScore;
+            // Combine NLP and ML fraud scores (60% ML, 40% NLP)
+            var combinedFraudScore = (fraudScore * 0.6m) + (narrativeFraudScore * 0.4m);
+            claim.FraudScore = combinedFraudScore;
             claim.ApprovalScore = approvalScore;
             
             result.MlScoring = new MlScoringResult
             {
-                FraudScore = fraudScore,
+                FraudScore = combinedFraudScore,
                 ApprovalScore = approvalScore,
-                FraudRiskLevel = fraudScore > 0.7m ? "High" : fraudScore > 0.4m ? "Medium" : "Low"
+                FraudRiskLevel = combinedFraudScore > 0.7m ? "High" : combinedFraudScore > 0.4m ? "Medium" : "Low"
             };
             
-            _logger.LogInformation("Claim {ClaimId} scored: FraudScore={FraudScore:P2}, ApprovalScore={ApprovalScore:P2}", 
-                claimId, fraudScore, approvalScore);
+            _logger.LogInformation("Claim {ClaimId} scored: FraudScore={FraudScore:P2} (ML={MlScore:P2} + NLP={NlpScore:P2}), ApprovalScore={ApprovalScore:P2}", 
+                claimId, combinedFraudScore, fraudScore, narrativeFraudScore, approvalScore);
 
             // Step 5: Determine final decision
-            var decision = await _mlScoringService.DetermineDecisionAsync(fraudScore, approvalScore);
+            var decision = await _mlScoringService.DetermineDecisionAsync(combinedFraudScore, approvalScore);
             result.FinalDecision = decision;
 
             switch (decision)
             {
                 case "AutoApprove":
                     claim.Status = ClaimStatus.Approved;
-                    result.DecisionReason = $"Auto-approved: Low fraud risk ({fraudScore:P2}), high approval score ({approvalScore:P2})";
+                    result.DecisionReason = $"Auto-approved: Low fraud risk ({combinedFraudScore:P2}), high approval score ({approvalScore:P2})";
                     await CreateDecisionAsync(claim, DecisionStatus.Approved, result.DecisionReason, isAutoDecision: true);
                     _logger.LogInformation("Claim {ClaimId} auto-approved", claimId);
                     break;
 
                 case "Reject":
                     claim.Status = ClaimStatus.Rejected;
-                    result.DecisionReason = $"Rejected: High fraud risk detected ({fraudScore:P2})";
+                    result.DecisionReason = $"Rejected: High fraud risk detected ({combinedFraudScore:P2})";
                     await CreateDecisionAsync(claim, DecisionStatus.Rejected, result.DecisionReason, isAutoDecision: true);
                     _logger.LogWarning("Claim {ClaimId} rejected due to high fraud score", claimId);
                     break;
 
                 default: // ManualReview
                     claim.Status = ClaimStatus.UnderReview;
-                    result.DecisionReason = $"Requires manual review: Moderate risk (Fraud: {fraudScore:P2}, Approval: {approvalScore:P2})";
+                    result.DecisionReason = $"Requires manual review: Moderate risk (Fraud: {combinedFraudScore:P2}, Approval: {approvalScore:P2})";
                     await CreateDecisionAsync(claim, DecisionStatus.PendingReview, result.DecisionReason);
                     _logger.LogInformation("Claim {ClaimId} routed to manual review", claimId);
                     break;

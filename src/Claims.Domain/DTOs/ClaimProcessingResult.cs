@@ -30,6 +30,11 @@ public class ClaimProcessingResult
     public RulesValidationResult? RulesValidation { get; set; }
     
     /// <summary>
+    /// Results from NLP analysis (Bedrock + Comprehend)
+    /// </summary>
+    public NlpAnalysisResult? NlpAnalysis { get; set; }
+    
+    /// <summary>
     /// Results from ML-based fraud detection and scoring
     /// </summary>
     public MlScoringResult? MlScoring { get; set; }
@@ -65,12 +70,39 @@ public class RulesValidationResult
 }
 
 /// <summary>
+/// NLP analysis result using AWS Bedrock and Comprehend
+/// </summary>
+public class NlpAnalysisResult
+{
+    /// <summary>
+    /// Summarized claim description from Bedrock
+    /// </summary>
+    public string? Summary { get; set; }
+    
+    /// <summary>
+    /// Fraud risk score from NLP analysis (0.0 to 1.0)
+    /// </summary>
+    public decimal FraudRiskScore { get; set; }
+    
+    /// <summary>
+    /// Extracted entities (JSON string) from Comprehend + Bedrock
+    /// </summary>
+    public string? DetectedEntities { get; set; }
+    
+    /// <summary>
+    /// Claim type classification from Bedrock
+    /// </summary>
+    public string? ClaimType { get; set; }
+}
+
+/// <summary>
 /// ML-based scoring result
 /// </summary>
 public class MlScoringResult
 {
     /// <summary>
     /// Probability that the claim is fraudulent (0.0 to 1.0)
+    /// Combined score: 60% ML + 40% NLP
     /// </summary>
     public decimal FraudScore { get; set; }
     

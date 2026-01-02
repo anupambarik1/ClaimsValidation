@@ -73,21 +73,24 @@ else
 // Register NLP service
 var useAzureOpenAI = builder.Configuration.GetValue<bool>("FeatureFlags:UseAzureOpenAI");
 var useAwsBedrock = builder.Configuration.GetValue<bool>("AWS:Bedrock:Enabled");
-if (useAzureOpenAI && !useAwsBedrock)
-{
-    builder.Services.AddSingleton<INlpService, AzureOpenAIService>();
-}
-else if (useAwsBedrock && !useAzureOpenAI)
+var awsEnabled = builder.Configuration.GetValue<bool>("AWS:Enabled");
+
+if (awsEnabled && useAwsBedrock)
 {
     builder.Services.AddSingleton<INlpService, Claims.Services.Aws.AWSNlpService>();
+    builder.Services.AddSingleton<AWSBedrockService>();
 }
-else if (chosenProvider == "azure")
+else if (useAzureOpenAI)
 {
     builder.Services.AddSingleton<INlpService, AzureOpenAIService>();
+}
+else if (awsEnabled)
+{
+    builder.Services.AddSingleton<INlpService, Claims.Services.Aws.AWSNlpService>();
 }
 else
 {
-    builder.Services.AddSingleton<INlpService, Claims.Services.Aws.AWSNlpService>();
+    builder.Services.AddSingleton<INlpService, AzureOpenAIService>();
 }
 
 // Register Blob storage service
