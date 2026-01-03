@@ -4,6 +4,7 @@ using Microsoft.Extensions.Logging;
 using Amazon.Textract;
 using Amazon.Textract.Model;
 using Amazon.S3;
+using Amazon.S3.Model;
 using Amazon;
 using System.Text;
 
@@ -73,52 +74,87 @@ public class AWSTextractService : IOcrService
                 return (string.Empty, 0m);
             }
 
-            _logger.LogInformation("Textract: Attempting to process S3 object - Bucket: {Bucket}, Key: {Key}", bucket, key);
+            _logger.LogInformation("Processing document with Textract: s3://{Bucket}/{Key}", bucket, key);
 
-            var req = new AnalyzeDocumentRequest
+            try
             {
-                FeatureTypes = new List<string> { "TABLES", "FORMS" },
-                Document = new Document
+                // Try AWS Textract for proper OCR and document parsing
+                var req = new AnalyzeDocumentRequest
                 {
-                    S3Object = new S3Object { Bucket = bucket, Name = key }
-                }
-            };
+                    FeatureTypes = new List<string> { "TABLES", "FORMS" },
+                    Document = new Amazon.Textract.Model.Document
+                    {
+                        S3Object = new Amazon.Textract.Model.S3Object { Bucket = bucket, Name = key }
+                    }
+                };
 
-            var resp = await _textractClient.AnalyzeDocumentAsync(req);
-            var sb = new StringBuilder();
-            decimal highestConfidence = 0m;
-            foreach (var block in resp.Blocks)
-            {
-                if (block.BlockType == BlockType.LINE && !string.IsNullOrEmpty(block.Text))
+                var resp = await _textractClient.AnalyzeDocumentAsync(req);
+                var sb = new StringBuilder();
+                decimal highestConfidence = 0m;
+                
+                // Extract text from Textract blocks
+                foreach (var block in resp.Blocks)
                 {
-                    sb.AppendLine(block.Text);
-                    if (block.Confidence > 0 && (decimal)block.Confidence > highestConfidence)
-                        highestConfidence = (decimal)block.Confidence;
+                    if (block.BlockType == BlockType.LINE && !string.IsNullOrEmpty(block.Text))
+                    {
+                        sb.AppendLine(block.Text);
+                        if (block.Confidence > 0 && (decimal)block.Confidence > highestConfidence)
+                            highestConfidence = (decimal)block.Confidence;
+                    }
                 }
+
+                _logger.LogInformation("Textract: Successfully extracted {LineCount} lines with {Confidence:P2} confidence", 
+                    resp.Blocks.Count(b => b.BlockType == BlockType.LINE), highestConfidence);
+                
+                return (sb.ToString(), highestConfidence);
             }
-
-            _logger.LogInformation("Textract: Successfully processed document, extracted {LineCount} lines", 
-                resp.Blocks.Count(b => b.BlockType == BlockType.LINE));
-            return (sb.ToString(), highestConfidence);
-        }
-        catch (Amazon.Textract.Model.InvalidS3ObjectException ex)
-        {
-            _logger.LogError(ex, "Textract S3 Error - Unable to access S3 object. Check: 1) S3 bucket exists in correct region, 2) Object key is correct, 3) IAM permissions allow Textract access, 4) AWS credentials are valid");
-            return (string.Empty, 0m);
-        }
-        catch (Amazon.Runtime.Internal.HttpErrorResponseException ex)
-        {
-            _logger.LogError(ex, "Textract HTTP Error - AWS service responded with error. StatusCode: {StatusCode}", ex.Message);
-            return (string.Empty, 0m);
-        }
-        catch (AmazonTextractException ex)
-        {
-            _logger.LogError(ex, "Textract AWS Service Error: {Message}", ex.Message);
-            return (string.Empty, 0m);
+            catch (Amazon.Textract.Model.UnsupportedDocumentException ex)
+            {
+                _logger.LogWarning(ex, "Textract: Document format not supported. Falling back to direct file read. File: {Key}", key);
+                // Fallback: Read file directly from S3 as text
+                return await ReadFileDirectlyAsync(bucket, key);
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Unexpected error calling Textract for URI: {Uri}", blobUri);
+            _logger.LogError(ex, "Error processing document: {Uri}", blobUri);
+            return (string.Empty, 0m);
+        }
+    }
+
+    /// <summary>
+    /// Fallback: Reads file content directly from S3 when Textract fails
+    /// </summary>
+    private async Task<(string ExtractedText, decimal Confidence)> ReadFileDirectlyAsync(string bucket, string key)
+    {
+        try
+        {
+            _logger.LogInformation("Reading file directly from S3: s3://{Bucket}/{Key}", bucket, key);
+            
+            var s3Client = new AmazonS3Client();
+            var request = new Amazon.S3.Model.GetObjectRequest
+            {
+                BucketName = bucket,
+                Key = key
+            };
+
+            var response = await s3Client.GetObjectAsync(request);
+            using (var reader = new StreamReader(response.ResponseStream))
+            {
+                var content = await reader.ReadToEndAsync();
+                if (string.IsNullOrWhiteSpace(content))
+                {
+                    _logger.LogWarning("File content is empty: {Key}", key);
+                    return (string.Empty, 0.5m);
+                }
+
+                _logger.LogInformation("Fallback: Successfully read {Length} chars from file", content.Length);
+                return (content, 0.70m); // Lower confidence for direct read
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading file directly: {Bucket}/{Key}", bucket, key);
             return (string.Empty, 0m);
         }
     }

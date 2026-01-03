@@ -3,6 +3,7 @@ using Claims.Domain.Entities;
 using Claims.Domain.Enums;
 using Claims.Infrastructure.Data;
 using Claims.Services.Interfaces;
+using Claims.Services.Aws;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using System.Text.Json;
@@ -18,6 +19,7 @@ public class ClaimsService : IClaimsService
     private readonly INotificationService _notificationService;
     private readonly IDocumentAnalysisService _documentAnalysisService;
     private readonly INlpService _nlpService;
+    private readonly IS3UploadService _s3UploadService;
     private readonly ILogger<ClaimsService> _logger;
 
     public ClaimsService(
@@ -28,6 +30,7 @@ public class ClaimsService : IClaimsService
         INotificationService notificationService,
         IDocumentAnalysisService documentAnalysisService,
         INlpService nlpService,
+        IS3UploadService s3UploadService,
         ILogger<ClaimsService> logger)
     {
         _context = context;
@@ -37,6 +40,7 @@ public class ClaimsService : IClaimsService
         _notificationService = notificationService;
         _documentAnalysisService = documentAnalysisService;
         _nlpService = nlpService;
+        _s3UploadService = s3UploadService;
         _logger = logger;
     }
 
@@ -62,17 +66,33 @@ public class ClaimsService : IClaimsService
                 DocumentId = Guid.NewGuid(),
                 ClaimId = claim.ClaimId,
                 DocumentType = doc.DocumentType,
-                BlobUri = doc.FilePath, // Use original file path for Textract/OCR processing
+                BlobUri = doc.FilePath, // Temporary - will be updated with S3 URI
                 UploadedDate = DateTime.UtcNow,
                 OcrStatus = OcrStatus.Pending
             };
             
             claim.Documents.Add(document);
-            _logger.LogInformation("Document added to claim {ClaimId}: Type={DocumentType}, Path={FilePath}", 
-                claim.ClaimId, doc.DocumentType, doc.FilePath);
         }
 
         _context.Claims.Add(claim);
+        await _context.SaveChangesAsync();
+
+        // Upload documents to S3 and update BlobUri with S3 paths
+        foreach (var document in claim.Documents)
+        {
+            try
+            {
+                var s3Uri = await _s3UploadService.UploadDocumentAsync(document.BlobUri, claim.ClaimId.ToString(), document.DocumentId.ToString());
+                document.BlobUri = s3Uri; // Update with S3 URI
+                _logger.LogInformation("Document {DocumentId} uploaded to S3: {S3Uri}", document.DocumentId, s3Uri);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError(ex, "Failed to upload document {DocumentId} to S3", document.DocumentId);
+                // Continue with other documents even if one fails
+            }
+        }
+
         await _context.SaveChangesAsync();
 
         // Send notification
@@ -106,7 +126,7 @@ public class ClaimsService : IClaimsService
         {
 
             // Step 2: Classify document
-            var sampleClaimsPDFExtractedTextByAWSTextract = await _documentAnalysisService.AnalyzeDocumentWithStructureAsync("s3://claims-documents-validation/claims_invoice.pdf");
+            //var sampleClaimsPDFExtractedTextByAWSTextract = await _documentAnalysisService.AnalyzeDocumentWithStructureAsync("s3://claims-documents-validation/claims_invoice.pdf");
 
 
             var claim = await _context.Claims

@@ -42,6 +42,7 @@ builder.Services.AddScoped<IDocumentAnalysisService, AWSTextractDocumentIntellig
 builder.Services.AddScoped<IRulesEngineService, RulesEngineService>();
 builder.Services.AddSingleton<IMlScoringService, MlScoringService>(); // Singleton to keep ML model loaded
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IS3UploadService, AWSS3UploadService>(); // Add S3 upload service
 
 // Register AWS Document Intelligence Service (Textract with advanced features)
 var useAwsTextractIntelligence = builder.Configuration.GetValue<bool>("AWS:Textract:Enabled");
